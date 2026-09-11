@@ -86,7 +86,7 @@ def load_semgrep(path, project="."):
         })
     return findings
 
-def load_spotbugs(path):
+def load_spotbugs(path, project=".", srcroot=""):
     findings = []
     if not path or not os.path.exists(path):
         return findings
@@ -104,18 +104,31 @@ def load_spotbugs(path):
         if re.search(r"SQL_|XXE|PATH_TRAVER|COMMAND_INJ|DESERIAL|SSRF|WEAK_CRYPT|HARDCODED", typ):
             sev = guess_severity(typ) or "HIGH"
         cls = bug.find(".//Class")
-        fm = bug.find(".//SourceLine")
+        # NOTE: use DIRECT child SourceLine — .//SourceLine resolves to the
+        # nested one inside <Class>/<BugPattern> (always the class-decl line),
+        # not the finding's actual method line.
+        fm = bug.find("SourceLine")
         loc = cls.get("classname", "") if cls is not None else ""
         line = fm.get("start", "?") if fm is not None else "?"
+        # map fully-qualified class name -> source file under srcroot so we can
+        # inline real code (maven: srcroot=src/main/java; loose: srcroot=.)
+        srcfile = ""
+        if srcroot and loc:
+            cand = os.path.join(srcroot, loc.replace(".", "/") + ".java")
+            if os.path.exists(cand):
+                srcfile = cand
+        snip = ""
+        if srcfile and str(line).isdigit():
+            snip = read_snippet(srcfile, int(line), int(line))
         findings.append({
             "engine": "spotbugs+findsecbugs",
             "rule": typ,
-            "file": loc,
+            "file": srcfile or loc,
             "line_start": line,
             "line_end": line,
             "severity": sev,
             "message": bug.get("category", "") + " " + typ,
-            "snippet": "",
+            "snippet": snip,
         })
     return findings
 
@@ -123,17 +136,22 @@ def dedupe(findings):
     seen = {}
     out = []
     for f in findings:
-        key = (f["file"], f["line_start"], re.sub(r"[^a-z]", "", f["rule"])[:20])
+        # key on (file, line, normalized rule) — full rule, not truncated,
+        # so distinct findings at the same line stay distinct.
+        key = (f["file"], f["line_start"], re.sub(r"[^a-z]", "", f["rule"]).lower())
         if key not in seen:
             seen[key] = f
             out.append(f)
         else:
-            # keep higher severity, merge engines
+            # keep higher severity; merge distinct rules + engines (no dup)
             keep = seen[key]
             if SEV_ORDER.get(f["severity"], 9) < SEV_ORDER.get(keep["severity"], 9):
                 keep["severity"] = f["severity"]
-            keep["rule"] = keep["rule"] + " / " + f["rule"]
-            keep["engine"] = keep["engine"] + "+" + f["engine"]
+            if f["rule"] != keep["rule"]:
+                keep["rule"] = keep["rule"] + " / " + f["rule"]
+            # merge engine tokens without repetition
+            merged = list(dict.fromkeys(keep["engine"].split("+") + f["engine"].split("+")))
+            keep["engine"] = "+".join(merged)
     return out
 
 def main():
@@ -142,12 +160,19 @@ def main():
     ap.add_argument("--spotbugs")
     ap.add_argument("--project", default=".")
     ap.add_argument("--out-dir", default=".")
+    ap.add_argument("--srcroot", default="",
+                    help="source root for inlining SpotBugs findings (maven: src/main/java; loose: dir containing pkg dirs)")
     a = ap.parse_args()
     os.makedirs(a.out_dir, exist_ok=True)
 
-    findings = load_semgrep(a.semgrep, project=a.project) + load_spotbugs(a.spotbugs)
+    findings = load_semgrep(a.semgrep, project=a.project) + load_spotbugs(a.spotbugs, project=a.project, srcroot=a.srcroot)
     findings = dedupe(findings)
-    findings.sort(key=lambda f: (SEV_ORDER.get(f["severity"], 9), f["file"], f["line_start"] or 0))
+    def _ln(v):
+        try:
+            return int(v)
+        except Exception:
+            return 0
+    findings.sort(key=lambda f: (SEV_ORDER.get(f["severity"], 9), str(f["file"]), _ln(f["line_start"])))
 
     # make file paths relative to project for readability
     for f in findings:

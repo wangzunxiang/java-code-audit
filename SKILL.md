@@ -1,7 +1,7 @@
 ---
 name: java-code-audit
 description: "Statically audit Java codebases for security vulnerabilities and defects using semgrep, SpotBugs + Find Security Bugs, and produce an evidence-backed Chinese Markdown report. Use when the user asks to audit/scan/assess a Java (or Spring/Struts/Dubbo/MyBatis) project for SQL injection, RCE, XXE, deserialization, SSRF, path traversal, weak crypto, and classic bugs, or wants a reusable Java SAST workflow."
-version: 1.0.0
+version: 1.1.0
 author: wangzunxiang
 license: MIT
 platforms: [linux, macos, windows]
@@ -40,8 +40,9 @@ Default deliverable path: `F:\hermesproject\` → WSL `/mnt/f/hermesproject/<pro
 
 # 2) JDK (SpotBugs path needs javac + a JDK 8/11/17). No java? Install Temurin:
 java -version 2>/dev/null || echo "NO_JAVA"
-#   Download from https://api.adoptium.net/v3/assets/latest/17/hotspot?architecture=x64&image_type=jdk&os=linux
-#   (parse binary.package.link) into ~/.local/share/android-tools/jdk17 and export JAVA_HOME.
+#   Fast source: TUNA Adoptium mirror (github.com assets 404/slow behind this proxy):
+#   https://mirrors.tuna.tsinghua.edu.cn/Adoptium/17/jdk/x64/linux/OpenJDK17U-jdk_x64_linux_hotspot_17.0.20.1_1.tar.gz
+#   extract to ~/.local/share/android-tools/jdk17 and export JAVA_HOME. (~1 min, vs 40+ min direct)
 
 # 3) SpotBugs + findsecbugs plugin (download the dist tarball; needs network)
 ls ~/.local/share/spotbugs/spotbugs/bin/spotbugs 2>/dev/null || echo "NO_SPOTBUGS"
@@ -89,14 +90,15 @@ mvn -q com.github.spotbugs:spotbugs-maven-plugin:4.8.3.2:check \
 # XML report: target/spotbugsXml.xml
 ```
 
-**Gradle** or **no build system (loose .java):** compile manually then run the SpotBugs CLI directly:
+**Gradle** or **no build system (loose .java):** compile manually then run the SpotBugs CLI. The GitHub dist tarball 404s behind this host's proxy, so the proven path is to **assemble the classpath from a Maven mirror** (`scripts/fetch_maven_deps.py`) and run the main class directly — full tested commands in `references/findsecbugs-setup.md`. Short form:
 ```bash
-# compile all sources to ./out (adjust package paths)
-javac -d out $(find . -name '*.java')
-# run spotbugs with findsecbugs plugin on the class output
-~/.local/share/spotbugs/spotbugs/bin/spotbugs \
-  -textui -pluginList $(find ~/.local/share/findsecbugs -name 'findsecbugs-*.jar') \
-  -xml:withLocations -output spotbugs.xml out
+# compile all sources to ./out (match package dirs, e.g. src/demo/Vuln.java -> out/demo/Vuln.class)
+javac -d out $(find src -name '*.java')
+# fetch deps + plugin (see reference), then:
+CP="$(cat /tmp/sbjars/classpath.txt):/tmp/findsecbugs-1.14.0.jar"
+$JAVA_HOME/bin/java -Xmx2g -cp "$CP" edu.umd.cs.findbugs.LaunchAppropriateUI \
+  -textui -effort:max -pluginList /tmp/findsecbugs-1.14.0.jar \
+  -xml:withMessages -output spotbugs.xml out
 ```
 If the project will not compile (deps unavailable), **skip Step 2 and say so** — semgrep source findings still stand. Do not report bytecode findings you didn't actually produce.
 
@@ -125,16 +127,19 @@ Use `scripts/make_report.py` or follow `references/report-template.md`. Requirem
 - **semgrep `--lang` alone errors.** `--config` must be present; do NOT pass `--lang` by itself ("`-e/--pattern and -l/--lang must both be specified`"). Let it auto-detect, or pair `--lang java` with a `--config`.
 - **stale `attrs` breaks semgrep on some hosts.** Symptom: `ModuleNotFoundError: No module named 'attrs'`. Fix: `pip3 install --user --upgrade "attrs>=21.4"`. A `trufflehog3` pin warning afterwards is harmless.
 - **SpotBugs needs compiled bytecode, not source.** No JDK or a project that won't compile ⇒ skip Step 2 honestly, don't invent findings.
-- **Proxy / network:** this WSL host routes egress through `127.0.0.1:3067`. GitHub downloads (JDK, spotbugs tarball) are slow over it; use `curl -C -` to resume and `--noproxy` only for hosts that work direct (api.github.com GET works direct). First `semgrep scan --config p/...` needs network to fetch registry rules; cache a local `.semgrep.yml` for repeat/offline use.
+- **Proxy / network:** this WSL host routes egress through `127.0.0.1:3067`. GitHub *asset* downloads (JDK from adoptium's release, spotbugs `.tgz`) are slow or **404** over it. Fix: pull the JDK from a TUNA/Alibaba mirror and assemble SpotBugs from a Maven mirror (`scripts/fetch_maven_deps.py`, `MAVEN_BASE=https://maven.aliyun.com/repository/public`) — both are fast direct. api.github.com GET and repo1.maven.org / maven.aliyun.com work direct.
+- **asm version conflict (路线 B killer):** the raw dependency tree pulls BOTH asm-3.3.1 and asm-9.x; if 3.3.1 lands first on the classpath you get `Unsupported class file major version 61`. `fetch_maven_deps.py` already dedupes same-artifact to the highest version — if you build the classpath by hand, delete the low asm or order it after the high one.
+- **SpotBugs main class is `LaunchAppropriateUI`** (not `LauncherApp`), `-effort:max` (colon+lowercase), `-xml:withMessages` (not `withLocations`). Full tested syntax in `references/findsecbugs-setup.md`.
 - **Registry vs local rules:** `p/security-audit` is fetched from semgrep.dev registry; in air-gapped envs ship a `rules/` dir with the needed `.yml` and use `--config rules/`.
 - **findsecbugs version pinning:** the plugin version must match the SpotBugs version it was built against; if the plugin fails to load, check `~/.local/share/spotbugs` vs the findsecbugs jar version (see references/findsecbugs-setup.md).
 - **Large repos:** semgrep on a huge monorepo can be slow; scope with `--include` / `--exclude` (e.g. skip `test/`, `generated/`, vendored libs) before a full sweep.
 - **Severity is a judgment call** — a "SQLi" pattern hit on a constant query string is a false positive; read the snippet before assigning Critical. Mark suspected FPs as Info and say why.
 
 ## Files
-- `scripts/aggregate.py` — merge semgrep JSON + spotbugs XML → deduped ranked findings (JSON + CSV).
+- `scripts/fetch_maven_deps.py` — resolve + download a Maven artifact's full runtime dep tree (with `<dependencyManagement>`, `${project.version}`, parent inheritance, same-artifact dedupe) → `classpath.txt`. Used to run SpotBugs CLI when the GitHub dist 404s.
+- `scripts/aggregate.py` — merge semgrep JSON + spotbugs XML → deduped ranked findings (JSON + CSV). Pass `--srcroot` (maven: `src/main/java`) so SpotBugs bytecode findings inline real source code.
 - `scripts/make_report.py` — findings JSON/CSV → self-contained Chinese Markdown report.
 - `references/report-template.md` — report structure + severity rubric.
 - `references/maven-integration.md` — spotbugs-maven-plugin + findsecbugs POM + CI snippets.
-- `references/findsecbugs-setup.md` — manual SpotBugs + findsecbugs CLI install (no build system).
+- `references/findsecbugs-setup.md` — manual SpotBugs + findsecbugs CLI install/run (no build system); fully tested command set.
 - `references/semgrep-rules.md` — which p/security-audit Java rules map to which vuln; how to add a custom rule.
