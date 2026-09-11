@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.json
+findings.csv
+scan.json
+err.txt
+*.xml
+out/
+target/
+代码审计报告_*.md
