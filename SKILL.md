@@ -1,7 +1,7 @@
 ---
 name: java-code-audit
 description: "Statically audit Java codebases for security vulnerabilities and defects using semgrep, SpotBugs + Find Security Bugs, and produce an evidence-backed Chinese Markdown report. Use when the user asks to audit/scan/assess a Java (or Spring/Struts/Dubbo/MyBatis) project for SQL injection, RCE, XXE, deserialization, SSRF, path traversal, weak crypto, and classic bugs, or wants a reusable Java SAST workflow."
-version: 1.1.0
+version: 1.2.0
 author: wangzunxiang
 license: MIT
 platforms: [linux, macos, windows]
@@ -29,6 +29,7 @@ Default deliverable path: `F:\hermesproject\` → WSL `/mnt/f/hermesproject/<pro
 ## When to use / not use
 - USE: source-available Java projects (Maven/Gradle or loose `.java` files). Best for CI-style batch audit + report.
 - DON'T USE for: closed-source APKs (use `apk-static-analysis` / `mariana-trench`), pure dynamic/running-app testing (use `automated-pentest`), or non-Java codebases (drop to semgrep-only, `--lang` auto).
+- **Need a different engine?** Before committing to this two-engine flow, ask the three questions in `references/tool-landscape.md` (target form / can you compile / how deep a dataflow). If the target is an APK → mariana-trench; an enterprise CI platform → sonar-java; a Log4Shell exposure study → log4j-detector; research / building your own analyzer → Tai-e / WALA. Full TOP-10 landscape + selection matrix lives there.
 
 ## Prerequisites (verify BEFORE scanning, never assume)
 
@@ -143,3 +144,4 @@ Use `scripts/make_report.py` or follow `references/report-template.md`. Requirem
 - `references/maven-integration.md` — spotbugs-maven-plugin + findsecbugs POM + CI snippets.
 - `references/findsecbugs-setup.md` — manual SpotBugs + findsecbugs CLI install/run (no build system); fully tested command set.
 - `references/semgrep-rules.md` — which p/security-audit Java rules map to which vuln; how to add a custom rule.
+- `references/tool-landscape.md` — Java audit tool landscape (TOP-10 by stars) + when to switch/add an engine (mariana-trench, sonar-java, log4j-detector, Tai-e, WALA, chanzi…). Read when the target doesn't fit the two-engine default or the user asks about tool selection.

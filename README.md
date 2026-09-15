@@ -73,7 +73,8 @@ java-code-audit/
 │   ├── report-template.md        # 报告结构 + 严重度判定标准 (rubric)
 │   ├── maven-integration.md      # spotbugs-maven-plugin + findsecbugs POM + CI
 │   ├── findsecbugs-setup.md      # 无构建系统时 SpotBugs+findsecbugs 手动安装
-│   └── semgrep-rules.md          # p/security-audit 的 Java 规则映射 + 自定义规则
+│   ├── semgrep-rules.md          # p/security-audit 的 Java 规则映射 + 自定义规则
+│   └── tool-landscape.md         # 工具全景 TOP-10 + 选型（何时换/加引擎）
 ├── rules/                        # 可选：本地 semgrep 规则（离线/气隙用）
 ├── examples/vulnerable-app/      # 含已知漏洞的 Java 样例（自测用）
 ├── README.md
