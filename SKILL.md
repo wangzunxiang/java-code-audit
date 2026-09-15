@@ -1,7 +1,7 @@
 ---
 name: java-code-audit
 description: "Statically audit Java codebases for security vulnerabilities and defects using semgrep, SpotBugs + Find Security Bugs, and produce an evidence-backed Chinese Markdown report. Use when the user asks to audit/scan/assess a Java (or Spring/Struts/Dubbo/MyBatis) project for SQL injection, RCE, XXE, deserialization, SSRF, path traversal, weak crypto, and classic bugs, or wants a reusable Java SAST workflow."
-version: 1.2.0
+version: 2.0.0
 author: wangzunxiang
 license: MIT
 platforms: [linux, macos, windows]
